@@ -3,10 +3,11 @@
  * Ranjeet Kumar Gupta 251ADB005
  * https://github.com/ranjeetkumarguptabro-maker/calc-lab-home
  * Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
+ *
  * Resources used: Gemini (Google); see conversation history.
  * AI (ChatGPT): helped explain recursive-descent parsing, operator precedence,
- * exponentiation, parentheses, and error handling. Conversation history:
- * this ChatGPT conversation.
+ * parentheses, exponentiation, floating-point arithmetic, and error handling.
+ * Conversation history: this ChatGPT conversation.
  */
 
 #include <stdio.h>
@@ -15,10 +16,18 @@
 #include <ctype.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <math.h>
+#include <errno.h>
 
 #define STUDENT_FIRST "ranjeet-kumar"
 #define STUDENT_LAST  "gupta"
 #define STUDENT_ID    "251ADB005"
+
+typedef struct {
+    long long integer;
+    double real;
+    int is_float;
+} Value;
 
 static const char *p;
 static const char *error_at;
@@ -36,6 +45,29 @@ static void spaces(void)
 {
     while (*p == ' ' || *p == '\t' || *p == '\r')
         p++;
+}
+
+static Value make_integer(long long n)
+{
+    Value v;
+    v.integer = n;
+    v.real = (double)n;
+    v.is_float = 0;
+    return v;
+}
+
+static Value make_float(double n)
+{
+    Value v;
+    v.integer = 0;
+    v.real = n;
+    v.is_float = 1;
+    return v;
+}
+
+static double as_double(Value v)
+{
+    return v.is_float ? v.real : (double)v.integer;
 }
 
 static int add_overflow(long long a, long long b, long long *result)
@@ -85,7 +117,11 @@ static int mul_overflow(long long a, long long b, long long *result)
     return 0;
 }
 
-static long long number(void)
+/*
+ * Parse an integer or a decimal number.
+ * Decimal literals must contain digits on both sides of the dot.
+ */
+static Value number(void)
 {
     spaces();
 
@@ -93,49 +129,94 @@ static long long number(void)
 
     if (!isdigit((unsigned char)*p)) {
         fail_at(p);
-        return 0;
+        return make_integer(0);
     }
 
-    long long value = 0;
+    while (isdigit((unsigned char)*p))
+        p++;
 
-    while (isdigit((unsigned char)*p)) {
-        int digit = *p - '0';
+    int is_float = 0;
 
-        if (value > (LLONG_MAX - digit) / 10) {
-            fail_at(start);
-            return 0;
+    if (*p == '.') {
+        is_float = 1;
+        p++;
+
+        if (!isdigit((unsigned char)*p)) {
+            fail_at(p - 1);
+            return make_integer(0);
         }
 
-        value = value * 10 + digit;
-        p++;
+        while (isdigit((unsigned char)*p))
+            p++;
     }
 
+    size_t length = (size_t)(p - start);
+    char *token = malloc(length + 1);
+
+    if (token == NULL) {
+        fail_at(start);
+        return make_integer(0);
+    }
+
+    memcpy(token, start, length);
+    token[length] = '\0';
+
+    Value value;
+
+    if (is_float) {
+        errno = 0;
+        char *end = NULL;
+        double d = strtod(token, &end);
+
+        if (errno == ERANGE || end == token ||
+            *end != '\0' || !isfinite(d)) {
+            fail_at(start);
+            free(token);
+            return make_integer(0);
+        }
+
+        value = make_float(d);
+    } else {
+        long long n = 0;
+
+        for (size_t i = 0; i < length; i++) {
+            int digit = token[i] - '0';
+
+            if (n > (LLONG_MAX - digit) / 10) {
+                fail_at(start);
+                free(token);
+                return make_integer(0);
+            }
+
+            n = n * 10 + digit;
+        }
+
+        value = make_integer(n);
+    }
+
+    free(token);
     return value;
 }
 
-/*
- * A primary is a number or an expression inside parentheses.
- * The declaration lets primary() call expression() before its definition.
- */
-static long long expression(void);
+static Value expression(void);
 
-static long long primary(void)
+static Value primary(void)
 {
     spaces();
 
     if (*p == '(') {
         p++;
-        long long value = expression();
+
+        Value value = expression();
 
         if (failed)
-            return 0;
+            return make_integer(0);
 
         spaces();
 
         if (*p != ')') {
-            /* Report where the closing parenthesis is missing. */
             fail_at(p);
-            return 0;
+            return make_integer(0);
         }
 
         p++;
@@ -146,50 +227,62 @@ static long long primary(void)
 }
 
 /*
- * Exponentiation has higher precedence than multiplication.
- * Recursing on the right operand makes a ** b ** c mean a ** (b ** c).
+ * Exponentiation is right-associative:
+ * 2 ** 3 ** 2 means 2 ** (3 ** 2).
  */
-static long long power(void)
+static Value power(void)
 {
-    long long value = primary();
+    Value base = primary();
 
     if (failed)
-        return 0;
+        return make_integer(0);
 
     spaces();
 
     if (p[0] != '*' || p[1] != '*')
-        return value;
+        return base;
 
     const char *op_start = p;
     p += 2;
     spaces();
 
-    /* Save the exponent's starting position for error reporting. */
     const char *rhs_start = p;
-    long long exponent = power();
+    Value exponent = power();
 
     if (failed)
-        return 0;
-
-    if (exponent < 0) {
-        fail_at(rhs_start);
-        return 0;
-    }
+        return make_integer(0);
 
     /*
-     * Exponentiation by squaring avoids repeated multiplication.
-     * Starting at 1 makes 0 ** 0 evaluate to 1.
+     * Negative integer exponents are invalid under the assignment rules.
+     * Negative values can arise from parenthesized subtraction.
      */
+    if (!exponent.is_float && exponent.integer < 0) {
+        fail_at(rhs_start);
+        return make_integer(0);
+    }
+
+    if (base.is_float || exponent.is_float) {
+        double result = pow(as_double(base), as_double(exponent));
+
+        if (!isfinite(result)) {
+            fail_at(op_start);
+            return make_integer(0);
+        }
+
+        return make_float(result);
+    }
+
+    /* Integer exponentiation by squaring, including 0 ** 0 = 1. */
     long long result = 1;
-    long long factor = value;
-    unsigned long long remaining = (unsigned long long)exponent;
+    long long factor = base.integer;
+    unsigned long long remaining =
+        (unsigned long long)exponent.integer;
 
     while (remaining > 0) {
         if (remaining & 1ULL) {
             if (mul_overflow(result, factor, &result)) {
                 fail_at(op_start);
-                return 0;
+                return make_integer(0);
             }
         }
 
@@ -198,20 +291,17 @@ static long long power(void)
         if (remaining > 0 &&
             mul_overflow(factor, factor, &factor)) {
             fail_at(op_start);
-            return 0;
+            return make_integer(0);
         }
     }
 
-    return result;
+    return make_integer(result);
 }
 
-/*
- * A term handles multiplication and division after exponentiation.
- * Parenthesized expressions can be used as either operand.
- */
-static long long term(void)
+/* Multiplication and division have lower precedence than exponentiation. */
+static Value term(void)
 {
-    long long value = power();
+    Value value = power();
 
     while (!failed) {
         spaces();
@@ -221,52 +311,68 @@ static long long term(void)
         if (op != '*' && op != '/')
             break;
 
-        /*
-         * A double asterisk belongs to exponentiation, not multiplication.
-         */
         if (op == '*' && p[1] == '*')
             break;
 
         p++;
         spaces();
 
-        /* Keep the right operand position for division-by-zero errors. */
         const char *rhs_start = p;
-        long long rhs = power();
+        Value rhs = power();
 
         if (failed)
             break;
 
-        long long result;
+        if (value.is_float || rhs.is_float) {
+            double divisor = as_double(rhs);
 
-        if (op == '*') {
-            if (mul_overflow(value, rhs, &result)) {
+            if (op == '/' && divisor == 0.0) {
                 fail_at(rhs_start);
                 break;
             }
+
+            double result = op == '*'
+                ? as_double(value) * as_double(rhs)
+                : as_double(value) / divisor;
+
+            if (!isfinite(result)) {
+                fail_at(rhs_start);
+                break;
+            }
+
+            value = make_float(result);
         } else {
-            if (rhs == 0) {
-                fail_at(rhs_start);
-                break;
+            long long result;
+
+            if (op == '*') {
+                if (mul_overflow(value.integer, rhs.integer, &result)) {
+                    fail_at(rhs_start);
+                    break;
+                }
+            } else {
+                if (rhs.integer == 0) {
+                    fail_at(rhs_start);
+                    break;
+                }
+
+                if (value.integer == LLONG_MIN && rhs.integer == -1) {
+                    fail_at(rhs_start);
+                    break;
+                }
+
+                result = value.integer / rhs.integer;
             }
 
-            if (value == LLONG_MIN && rhs == -1) {
-                fail_at(rhs_start);
-                break;
-            }
-
-            result = value / rhs;
+            value = make_integer(result);
         }
-
-        value = result;
     }
 
     return value;
 }
 
-static long long expression(void)
+static Value expression(void)
 {
-    long long value = term();
+    Value value = term();
 
     while (!failed) {
         spaces();
@@ -279,22 +385,36 @@ static long long expression(void)
         p++;
 
         const char *rhs_start = p;
-        long long rhs = term();
+        Value rhs = term();
 
         if (failed)
             break;
 
-        long long result;
-        int overflow = op == '+'
-            ? add_overflow(value, rhs, &result)
-            : sub_overflow(value, rhs, &result);
+        if (value.is_float || rhs.is_float) {
+            double result = op == '+'
+                ? as_double(value) + as_double(rhs)
+                : as_double(value) - as_double(rhs);
 
-        if (overflow) {
-            fail_at(rhs_start);
-            break;
+            if (!isfinite(result)) {
+                fail_at(rhs_start);
+                break;
+            }
+
+            value = make_float(result);
+        } else {
+            long long result;
+
+            int overflow = op == '+'
+                ? add_overflow(value.integer, rhs.integer, &result)
+                : sub_overflow(value.integer, rhs.integer, &result);
+
+            if (overflow) {
+                fail_at(rhs_start);
+                break;
+            }
+
+            value = make_integer(result);
         }
-
-        value = result;
     }
 
     return value;
@@ -462,13 +582,9 @@ int main(int argc, char **argv)
         }
     }
 
-    /*
-     * Keep results until the entire file has been checked.
-     * If a later expression fails, do not write partial results.
-     */
     size_t capacity = 16;
     size_t count = 0;
-    long long *results = malloc(capacity * sizeof *results);
+    Value *results = malloc(capacity * sizeof *results);
 
     if (results == NULL) {
         fprintf(stderr, "Out of memory\n");
@@ -503,7 +619,7 @@ int main(int argc, char **argv)
             failed = 0;
             error_at = NULL;
 
-            long long result = expression();
+            Value result = expression();
             spaces();
 
             if (!failed && *p != '\0')
@@ -528,7 +644,8 @@ int main(int argc, char **argv)
                 }
 
                 capacity *= 2;
-                long long *larger =
+
+                Value *larger =
                     realloc(results, capacity * sizeof *results);
 
                 if (larger == NULL) {
@@ -561,8 +678,12 @@ int main(int argc, char **argv)
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
     } else {
-        for (size_t i = 0; i < count; i++)
-            fprintf(out, "%lld\n", results[i]);
+        for (size_t i = 0; i < count; i++) {
+            if (results[i].is_float)
+                fprintf(out, "%.15g\n", results[i].real);
+            else
+                fprintf(out, "%lld\n", results[i].integer);
+        }
     }
 
     int ok = !ferror(out);
