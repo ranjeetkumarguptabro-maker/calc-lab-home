@@ -1,9 +1,10 @@
+
 /*
  * Ranjeet Kumar Gupta 251ADB005
  * https://github.com/ranjeetkumarguptabro-maker/calc-lab-home
  * Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
  * Resources used: Gemini (Google).
- * Gemini conversation: https://share.gemini.google/7qfXVt5XmPBr
+ * Gemini conversation: https://share.google/7qfXVt5XmPBr
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +15,13 @@
 #include <math.h>
 #include <errno.h>
 #include <dirent.h>
+
+/* These values are used in the generated output names. */
 #define STUDENT_FIRST "ranjeet-kumar"
 #define STUDENT_LAST "gupta"
 #define STUDENT_ID "251ADB005"
+
+/* Keep integers and decimals separate so 7 / 2 stays 3. */
 typedef struct {
     long long integer;
     double real;
@@ -25,6 +30,8 @@ typedef struct {
 static const char *p;
 static const char *error_at;
 static int failed;
+
+/* Save only the first error; later checks should not replace it. */
 static void fail_at(const char *where)
 {
     if (!failed) {
@@ -32,11 +39,13 @@ static void fail_at(const char *where)
         error_at = where;
     }
 }
+
 static void spaces(void)
 {
     while (*p == ' ' || *p == '\t' || *p == '\r')
         p++;
 }
+
 static Value make_integer(long long n)
 {
     Value v;
@@ -45,6 +54,7 @@ static Value make_integer(long long n)
     v.is_float = 0;
     return v;
 }
+
 static Value make_float(double n)
 {
     Value v;
@@ -53,10 +63,13 @@ static Value make_float(double n)
     v.is_float = 1;
     return v;
 }
+
 static double as_double(Value v)
 {
     return v.is_float ? v.real : (double)v.integer;
 }
+
+/* Check the limits before doing integer math. */
 static int add_overflow(long long a, long long b, long long *result)
 {
     if ((b > 0 && a > LLONG_MAX - b) ||
@@ -65,6 +78,7 @@ static int add_overflow(long long a, long long b, long long *result)
     *result = a + b;
     return 0;
 }
+
 static int sub_overflow(long long a, long long b, long long *result)
 {
     if ((b < 0 && a > LLONG_MAX + b) ||
@@ -73,6 +87,7 @@ static int sub_overflow(long long a, long long b, long long *result)
     *result = a - b;
     return 0;
 }
+
 static int mul_overflow(long long a, long long b, long long *result)
 {
     if (a == 0 || b == 0) {
@@ -96,7 +111,8 @@ static int mul_overflow(long long a, long long b, long long *result)
     *result = a * b;
     return 0;
 }
-/* Decimal literals require digits on both sides of the decimal point. */
+
+/* Decimal literals need digits on both sides of the decimal point. */
 static Value number(void)
 {
     spaces();
@@ -118,6 +134,7 @@ static Value number(void)
         while (isdigit((unsigned char)*p))
             p++;
     }
+    /* strtod needs a null-terminated copy of the number. */
     size_t length = (size_t)(p - start);
     char *token = malloc(length + 1);
     if (token == NULL) {
@@ -154,7 +171,10 @@ static Value number(void)
     free(token);
     return value;
 }
+
 static Value expression(void);
+
+/* A primary is a number or an expression inside parentheses. */
 static Value primary(void)
 {
     spaces();
@@ -173,7 +193,8 @@ static Value primary(void)
     }
     return number();
 }
-/* Exponentiation is right-associative: 2 ** 3 ** 2 means 2 ** (3 ** 2). */
+
+/* ** is right-associative: 2 ** 3 ** 2 means 2 ** (3 ** 2). */
 static Value power(void)
 {
     Value base = primary();
@@ -193,6 +214,7 @@ static Value power(void)
         fail_at(rhs_start);
         return make_integer(0);
     }
+    /* Use floating-point power if either side is a decimal. */
     if (base.is_float || exponent.is_float) {
         double result = pow(as_double(base), as_double(exponent));
         if (!isfinite(result)) {
@@ -201,7 +223,7 @@ static Value power(void)
         }
         return make_float(result);
     }
-    /* Integer exponentiation by squaring reduces repeated multiplications. */
+    /* Squaring the factor avoids repeating every multiplication. */
     long long result = 1;
     long long factor = base.integer;
     unsigned long long remaining = (unsigned long long)exponent.integer;
@@ -221,7 +243,8 @@ static Value power(void)
     }
     return make_integer(result);
 }
-/* Multiplication and division have lower precedence than exponentiation. */
+
+/* Multiplication and division are handled before addition and subtraction. */
 static Value term(void)
 {
     Value value = power();
@@ -238,6 +261,7 @@ static Value term(void)
         Value rhs = power();
         if (failed)
             break;
+        /* A decimal on either side makes this operation floating-point. */
         if (value.is_float || rhs.is_float) {
             double divisor = as_double(rhs);
             if (op == '/' && divisor == 0.0) {
@@ -275,6 +299,8 @@ static Value term(void)
     }
     return value;
 }
+
+/* Addition and subtraction are the lowest-precedence operators. */
 static Value expression(void)
 {
     Value value = term();
@@ -312,7 +338,8 @@ static Value expression(void)
     }
     return value;
 }
-/* Read the complete file so errors include earlier lines and newlines. */
+
+/* Read the whole file so error positions can include earlier lines. */
 static char *read_file(const char *path, size_t *length_out)
 {
     FILE *f = fopen(path, "rb");
@@ -360,6 +387,8 @@ static char *basename_copy(const char *path)
     }
     return copy;
 }
+
+/* Parse one input file and write its results to the output file. */
 static int process_file(const char *input, const char *outdir)
 {
     char *base = basename_copy(input);
@@ -415,6 +444,7 @@ static int process_file(const char *input, const char *outdir)
     size_t pos = 0;
     size_t error_pos = 0;
     int has_error = 0;
+    /* Process each line while keeping its position in the original file. */
     while (pos < source_length) {
         size_t end = pos;
         while (end < source_length && source[end] != '\n')
@@ -425,7 +455,7 @@ static int process_file(const char *input, const char *outdir)
                 source[first] == '\t' ||
                 source[first] == '\r'))
             first++;
-        /* Only lines starting with # after whitespace are comments. */
+        /* A # is a comment only at the start of a line after whitespace. */
         if (first < end && source[first] != '#') {
             char saved = source[end];
             source[end] = '\0';
@@ -474,6 +504,7 @@ static int process_file(const char *input, const char *outdir)
         free(base);
         return 1;
     }
+    /* If a line failed, write the error instead of partial results. */
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
     } else {
@@ -496,11 +527,14 @@ static int process_file(const char *input, const char *outdir)
     }
     return 0;
 }
+
+/* Directory mode only accepts files ending in .txt. */
 static int ends_with_txt(const char *name)
 {
     size_t length = strlen(name);
     return length >= 4 && strcmp(name + length - 4, ".txt") == 0;
 }
+
 static int ensure_directory(const char *path)
 {
     struct stat st;
@@ -515,6 +549,8 @@ static int ensure_directory(const char *path)
     fprintf(stderr, "Cannot create output directory: %s\n", path);
     return 0;
 }
+
+/* Read the options first, then choose single-file or directory mode. */
 int main(int argc, char **argv)
 {
     const char *input = NULL;
@@ -573,6 +609,7 @@ int main(int argc, char **argv)
         }
         outdir = default_dir;
     }
+    /* A single input file does not need the directory scanning code. */
     if (input != NULL)
         return process_file(input, outdir);
     struct stat dir_stat;
@@ -585,7 +622,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Cannot open input directory: %s\n", input_dir);
         return 1;
     }
-    /* Collect paths before processing so output files are not included. */
+    /* Save paths first so output files are not picked up during scanning. */
     char **paths = NULL;
     size_t count = 0;
     size_t capacity = 0;
