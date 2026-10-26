@@ -5,7 +5,8 @@
  * Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
  * Resources used: Gemini (Google); see conversation history.
  * AI (ChatGPT): helped explain recursive-descent parsing, operator precedence,
- * and error handling. Conversation history: this ChatGPT conversation.
+ * exponentiation, parentheses, and error handling. Conversation history:
+ * this ChatGPT conversation.
  */
 
 #include <stdio.h>
@@ -113,12 +114,104 @@ static long long number(void)
 }
 
 /*
- * A term handles * and / before expression handles + and -.
- * This grammar structure gives multiplication and division higher precedence.
+ * A primary is a number or an expression inside parentheses.
+ * The declaration lets primary() call expression() before its definition.
+ */
+static long long expression(void);
+
+static long long primary(void)
+{
+    spaces();
+
+    if (*p == '(') {
+        p++;
+        long long value = expression();
+
+        if (failed)
+            return 0;
+
+        spaces();
+
+        if (*p != ')') {
+            /* Report where the closing parenthesis is missing. */
+            fail_at(p);
+            return 0;
+        }
+
+        p++;
+        return value;
+    }
+
+    return number();
+}
+
+/*
+ * Exponentiation has higher precedence than multiplication.
+ * Recursing on the right operand makes a ** b ** c mean a ** (b ** c).
+ */
+static long long power(void)
+{
+    long long value = primary();
+
+    if (failed)
+        return 0;
+
+    spaces();
+
+    if (p[0] != '*' || p[1] != '*')
+        return value;
+
+    const char *op_start = p;
+    p += 2;
+    spaces();
+
+    /* Save the exponent's starting position for error reporting. */
+    const char *rhs_start = p;
+    long long exponent = power();
+
+    if (failed)
+        return 0;
+
+    if (exponent < 0) {
+        fail_at(rhs_start);
+        return 0;
+    }
+
+    /*
+     * Exponentiation by squaring avoids repeated multiplication.
+     * Starting at 1 makes 0 ** 0 evaluate to 1.
+     */
+    long long result = 1;
+    long long factor = value;
+    unsigned long long remaining = (unsigned long long)exponent;
+
+    while (remaining > 0) {
+        if (remaining & 1ULL) {
+            if (mul_overflow(result, factor, &result)) {
+                fail_at(op_start);
+                return 0;
+            }
+        }
+
+        remaining >>= 1;
+
+        if (remaining > 0 &&
+            mul_overflow(factor, factor, &factor)) {
+            fail_at(op_start);
+            return 0;
+        }
+    }
+
+    return result;
+}
+
+/*
+ * A term handles multiplication and division after exponentiation.
+ * Parenthesized expressions can be used as either operand.
  */
 static long long term(void)
 {
-    long long value = number();
+    long long value = power();
 
     while (!failed) {
         spaces();
@@ -128,12 +221,18 @@ static long long term(void)
         if (op != '*' && op != '/')
             break;
 
+        /*
+         * A double asterisk belongs to exponentiation, not multiplication.
+         */
+        if (op == '*' && p[1] == '*')
+            break;
+
         p++;
         spaces();
 
-        /* Keep the position of the right operand for division-by-zero errors. */
+        /* Keep the right operand position for division-by-zero errors. */
         const char *rhs_start = p;
-        long long rhs = number();
+        long long rhs = power();
 
         if (failed)
             break;
@@ -178,6 +277,8 @@ static long long expression(void)
             break;
 
         p++;
+
+        const char *rhs_start = p;
         long long rhs = term();
 
         if (failed)
@@ -189,7 +290,7 @@ static long long expression(void)
             : sub_overflow(value, rhs, &result);
 
         if (overflow) {
-            fail_at(p - 1);
+            fail_at(rhs_start);
             break;
         }
 
@@ -362,8 +463,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * Save results until the entire file has been checked.
-     * If a later line fails, earlier results must not be written.
+     * Keep results until the entire file has been checked.
+     * If a later expression fails, do not write partial results.
      */
     size_t capacity = 16;
     size_t count = 0;
