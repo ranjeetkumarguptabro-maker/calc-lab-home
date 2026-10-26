@@ -15,8 +15,8 @@
 #include <errno.h>
 #include <dirent.h>
 #define STUDENT_FIRST "ranjeet-kumar"
-#define STUDENT_LAST  "gupta"
-#define STUDENT_ID    "251ADB005"
+#define STUDENT_LAST "gupta"
+#define STUDENT_ID "251ADB005"
 typedef struct {
     long long integer;
     double real;
@@ -96,7 +96,7 @@ static int mul_overflow(long long a, long long b, long long *result)
     *result = a * b;
     return 0;
 }
-/* Parse an integer or a decimal number. Decimal literals must contain digits on both sides of the dot. */
+/* Decimal literals require digits on both sides of the decimal point. */
 static Value number(void)
 {
     spaces();
@@ -189,7 +189,6 @@ static Value power(void)
     Value exponent = power();
     if (failed)
         return make_integer(0);
-/* Negative integer exponents are invalid under the assignment rules. Negative values can arise from parenthesized subtraction. */
     if (!exponent.is_float && exponent.integer < 0) {
         fail_at(rhs_start);
         return make_integer(0);
@@ -202,11 +201,10 @@ static Value power(void)
         }
         return make_float(result);
     }
-    /* Integer exponentiation by squaring, including 0 ** 0 = 1. */
+    /* Integer exponentiation by squaring reduces repeated multiplications. */
     long long result = 1;
     long long factor = base.integer;
-    unsigned long long remaining =
-        (unsigned long long)exponent.integer;
+    unsigned long long remaining = (unsigned long long)exponent.integer;
     while (remaining > 0) {
         if (remaining & 1ULL) {
             if (mul_overflow(result, factor, &result)) {
@@ -314,27 +312,32 @@ static Value expression(void)
     }
     return value;
 }
+/* Read the complete file so errors include earlier lines and newlines. */
 static char *read_file(const char *path, size_t *length_out)
 {
     FILE *f = fopen(path, "rb");
     if (f == NULL)
         return NULL;
     if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f); return NULL;
+        fclose(f);
+        return NULL;
     }
     long length = ftell(f);
     if (length < 0 || (unsigned long)length >= (size_t)-1 ||
         fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f); return NULL;
+        fclose(f);
+        return NULL;
     }
     char *text = malloc((size_t)length + 1);
     if (text == NULL) {
-        fclose(f); return NULL;
+        fclose(f);
+        return NULL;
     }
     size_t n = fread(text, 1, (size_t)length, f);
     if (n != (size_t)length || ferror(f)) {
         free(text);
-        fclose(f); return NULL;
+        fclose(f);
+        return NULL;
     }
     text[n] = '\0';
     fclose(f);
@@ -372,12 +375,14 @@ static int process_file(const char *input, const char *outdir)
     char *source = read_file(input, &source_length);
     if (source == NULL) {
         fprintf(stderr, "Cannot read input file: %s\n", input);
-        free(base); return 1;
+        free(base);
+        return 1;
     }
     if (outdir[0] == '\0') {
         fprintf(stderr, "Invalid output directory\n");
         free(source);
-        free(base); return 1;
+        free(base);
+        return 1;
     }
     char output_path[4096];
     int n = snprintf(output_path, sizeof output_path,
@@ -386,7 +391,8 @@ static int process_file(const char *input, const char *outdir)
     if (n < 0 || (size_t)n >= sizeof output_path) {
         fprintf(stderr, "Output path is too long\n");
         free(source);
-        free(base); return 1;
+        free(base);
+        return 1;
     }
     if (mkdir(outdir, 0755) != 0) {
         struct stat st;
@@ -403,7 +409,8 @@ static int process_file(const char *input, const char *outdir)
     if (results == NULL) {
         fprintf(stderr, "Out of memory\n");
         free(source);
-        free(base); return 1;
+        free(base);
+        return 1;
     }
     size_t pos = 0;
     size_t error_pos = 0;
@@ -418,6 +425,7 @@ static int process_file(const char *input, const char *outdir)
                 source[first] == '\t' ||
                 source[first] == '\r'))
             first++;
+        /* Only lines starting with # after whitespace are comments. */
         if (first < end && source[first] != '#') {
             char saved = source[end];
             source[end] = '\0';
@@ -444,8 +452,7 @@ static int process_file(const char *input, const char *outdir)
                     return 1;
                 }
                 capacity *= 2;
-                Value *larger =
-                    realloc(results, capacity * sizeof *results);
+                Value *larger = realloc(results, capacity * sizeof *results);
                 if (larger == NULL) {
                     fprintf(stderr, "Out of memory\n");
                     free(results);
@@ -464,7 +471,8 @@ static int process_file(const char *input, const char *outdir)
         fprintf(stderr, "Cannot write output file: %s\n", output_path);
         free(results);
         free(source);
-        free(base); return 1;
+        free(base);
+        return 1;
     }
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
@@ -556,8 +564,8 @@ int main(int argc, char **argv)
             if (len >= 4 && strcmp(base + len - 4, ".txt") == 0)
                 base[len - 4] = '\0';
         }
-        int n = snprintf(default_dir, sizeof default_dir, "%s_%s_%s",
-                         base, STUDENT_FIRST, STUDENT_ID);
+        int n = snprintf(default_dir, sizeof default_dir,
+                         "%s_%s_%s", base, STUDENT_FIRST, STUDENT_ID);
         free(base);
         if (n < 0 || (size_t)n >= sizeof default_dir) {
             fprintf(stderr, "Output directory name is too long\n");
@@ -577,7 +585,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Cannot open input directory: %s\n", input_dir);
         return 1;
     }
-    /* Collect paths first so outputs created during processing are not added. */
+    /* Collect paths before processing so output files are not included. */
     char **paths = NULL;
     size_t count = 0;
     size_t capacity = 0;
