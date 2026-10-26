@@ -1,4 +1,3 @@
-
 /*
  * Ranjeet Kumar Gupta 251ADB005
  * https://github.com/ranjeetkumarguptabro-maker/calc-lab-home
@@ -6,7 +5,6 @@
  * Resources used: Gemini (Google).
  * Gemini conversation: https://share.gemini.google/7qfXVt5XmPBr
  */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,10 +96,7 @@ static int mul_overflow(long long a, long long b, long long *result)
     *result = a * b;
     return 0;
 }
-/*
- * Parse an integer or a decimal number.
- * Decimal literals must contain digits on both sides of the dot.
- */
+/* Parse an integer or a decimal number. Decimal literals must contain digits on both sides of the dot. */
 static Value number(void)
 {
     spaces();
@@ -178,10 +173,7 @@ static Value primary(void)
     }
     return number();
 }
-/*
- * Exponentiation is right-associative:
- * 2 ** 3 ** 2 means 2 ** (3 ** 2).
- */
+/* Exponentiation is right-associative: 2 ** 3 ** 2 means 2 ** (3 ** 2). */
 static Value power(void)
 {
     Value base = primary();
@@ -197,10 +189,7 @@ static Value power(void)
     Value exponent = power();
     if (failed)
         return make_integer(0);
-    /*
-     * Negative integer exponents are invalid under the assignment rules.
-     * Negative values can arise from parenthesized subtraction.
-     */
+/* Negative integer exponents are invalid under the assignment rules. Negative values can arise from parenthesized subtraction. */
     if (!exponent.is_float && exponent.integer < 0) {
         fail_at(rhs_start);
         return make_integer(0);
@@ -297,6 +286,7 @@ static Value expression(void)
         if (op != '+' && op != '-')
             break;
         p++;
+        spaces();
         const char *rhs_start = p;
         Value rhs = term();
         if (failed)
@@ -330,24 +320,21 @@ static char *read_file(const char *path, size_t *length_out)
     if (f == NULL)
         return NULL;
     if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
+        fclose(f); return NULL;
     }
     long length = ftell(f);
-    if (length < 0 || fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return NULL;
+    if (length < 0 || (unsigned long)length >= (size_t)-1 ||
+        fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f); return NULL;
     }
     char *text = malloc((size_t)length + 1);
     if (text == NULL) {
-        fclose(f);
-        return NULL;
+        fclose(f); return NULL;
     }
     size_t n = fread(text, 1, (size_t)length, f);
     if (n != (size_t)length || ferror(f)) {
         free(text);
-        fclose(f);
-        return NULL;
+        fclose(f); return NULL;
     }
     text[n] = '\0';
     fclose(f);
@@ -385,14 +372,12 @@ static int process_file(const char *input, const char *outdir)
     char *source = read_file(input, &source_length);
     if (source == NULL) {
         fprintf(stderr, "Cannot read input file: %s\n", input);
-        free(base);
-        return 1;
+        free(base); return 1;
     }
     if (outdir[0] == '\0') {
         fprintf(stderr, "Invalid output directory\n");
         free(source);
-        free(base);
-        return 1;
+        free(base); return 1;
     }
     char output_path[4096];
     int n = snprintf(output_path, sizeof output_path,
@@ -401,8 +386,7 @@ static int process_file(const char *input, const char *outdir)
     if (n < 0 || (size_t)n >= sizeof output_path) {
         fprintf(stderr, "Output path is too long\n");
         free(source);
-        free(base);
-        return 1;
+        free(base); return 1;
     }
     if (mkdir(outdir, 0755) != 0) {
         struct stat st;
@@ -419,8 +403,7 @@ static int process_file(const char *input, const char *outdir)
     if (results == NULL) {
         fprintf(stderr, "Out of memory\n");
         free(source);
-        free(base);
-        return 1;
+        free(base); return 1;
     }
     size_t pos = 0;
     size_t error_pos = 0;
@@ -481,8 +464,7 @@ static int process_file(const char *input, const char *outdir)
         fprintf(stderr, "Cannot write output file: %s\n", output_path);
         free(results);
         free(source);
-        free(base);
-        return 1;
+        free(base); return 1;
     }
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
