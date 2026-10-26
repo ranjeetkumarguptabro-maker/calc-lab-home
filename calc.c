@@ -16,12 +16,12 @@
 #include <errno.h>
 #include <dirent.h>
 
-/* These values are used in the generated output names. */
+/* These names go into the output file names. */
 #define STUDENT_FIRST "ranjeet-kumar"
 #define STUDENT_LAST "gupta"
 #define STUDENT_ID "251ADB005"
 
-/* Keep integers and decimals separate so 7 / 2 stays 3. */
+/* Keep track of decimals so integer division still works as expected. */
 typedef struct {
     long long integer;
     double real;
@@ -31,7 +31,7 @@ static const char *p;
 static const char *error_at;
 static int failed;
 
-/* Save only the first error; later checks should not replace it. */
+/* Keep the first error we find. */
 static void fail_at(const char *where)
 {
     if (!failed) {
@@ -69,7 +69,7 @@ static double as_double(Value v)
     return v.is_float ? v.real : (double)v.integer;
 }
 
-/* Check the limits before doing integer math. */
+/* Check for overflow before doing the calculation. */
 static int add_overflow(long long a, long long b, long long *result)
 {
     if ((b > 0 && a > LLONG_MAX - b) ||
@@ -112,7 +112,7 @@ static int mul_overflow(long long a, long long b, long long *result)
     return 0;
 }
 
-/* Decimal literals need digits on both sides of the decimal point. */
+/* A decimal number needs digits before and after the dot. */
 static Value number(void)
 {
     spaces();
@@ -134,7 +134,7 @@ static Value number(void)
         while (isdigit((unsigned char)*p))
             p++;
     }
-    /* strtod needs a null-terminated copy of the number. */
+    /* Make a separate string so strtod can read the number. */
     size_t length = (size_t)(p - start);
     char *token = malloc(length + 1);
     if (token == NULL) {
@@ -174,7 +174,7 @@ static Value number(void)
 
 static Value expression(void);
 
-/* A primary is a number or an expression inside parentheses. */
+/* This part is either a number or something in parentheses. */
 static Value primary(void)
 {
     spaces();
@@ -194,7 +194,7 @@ static Value primary(void)
     return number();
 }
 
-/* ** is right-associative: 2 ** 3 ** 2 means 2 ** (3 ** 2). */
+/* Work from the right for powers, so 2 ** 3 ** 2 is 2 ** (3 ** 2). */
 static Value power(void)
 {
     Value base = primary();
@@ -214,7 +214,7 @@ static Value power(void)
         fail_at(rhs_start);
         return make_integer(0);
     }
-    /* Use floating-point power if either side is a decimal. */
+    /* If either value is a decimal, use pow() for the result. */
     if (base.is_float || exponent.is_float) {
         double result = pow(as_double(base), as_double(exponent));
         if (!isfinite(result)) {
@@ -223,7 +223,7 @@ static Value power(void)
         }
         return make_float(result);
     }
-    /* Squaring the factor avoids repeating every multiplication. */
+    /* Repeated squaring makes large powers quicker to calculate. */
     long long result = 1;
     long long factor = base.integer;
     unsigned long long remaining = (unsigned long long)exponent.integer;
@@ -244,7 +244,7 @@ static Value power(void)
     return make_integer(result);
 }
 
-/* Multiplication and division are handled before addition and subtraction. */
+/* Handle * and / before + and -. */
 static Value term(void)
 {
     Value value = power();
@@ -261,7 +261,7 @@ static Value term(void)
         Value rhs = power();
         if (failed)
             break;
-        /* A decimal on either side makes this operation floating-point. */
+        /* If either value is a decimal, do this calculation as a double. */
         if (value.is_float || rhs.is_float) {
             double divisor = as_double(rhs);
             if (op == '/' && divisor == 0.0) {
@@ -300,7 +300,7 @@ static Value term(void)
     return value;
 }
 
-/* Addition and subtraction are the lowest-precedence operators. */
+/* Addition and subtraction are handled after the other operations. */
 static Value expression(void)
 {
     Value value = term();
@@ -339,7 +339,7 @@ static Value expression(void)
     return value;
 }
 
-/* Read the whole file so error positions can include earlier lines. */
+/* Read everything first so errors can point to the right position. */
 static char *read_file(const char *path, size_t *length_out)
 {
     FILE *f = fopen(path, "rb");
@@ -388,7 +388,7 @@ static char *basename_copy(const char *path)
     return copy;
 }
 
-/* Parse one input file and write its results to the output file. */
+/* Read an input file, calculate its lines, and save the results. */
 static int process_file(const char *input, const char *outdir)
 {
     char *base = basename_copy(input);
@@ -444,7 +444,7 @@ static int process_file(const char *input, const char *outdir)
     size_t pos = 0;
     size_t error_pos = 0;
     int has_error = 0;
-    /* Process each line while keeping its position in the original file. */
+    /* Go through the file one line at a time. */
     while (pos < source_length) {
         size_t end = pos;
         while (end < source_length && source[end] != '\n')
@@ -455,7 +455,7 @@ static int process_file(const char *input, const char *outdir)
                 source[first] == '\t' ||
                 source[first] == '\r'))
             first++;
-        /* A # is a comment only at the start of a line after whitespace. */
+        /* Ignore lines that start with #, even if there is whitespace first. */
         if (first < end && source[first] != '#') {
             char saved = source[end];
             source[end] = '\0';
@@ -504,7 +504,7 @@ static int process_file(const char *input, const char *outdir)
         free(base);
         return 1;
     }
-    /* If a line failed, write the error instead of partial results. */
+    /* If anything failed, write the error rather than partial answers. */
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
     } else {
@@ -528,7 +528,7 @@ static int process_file(const char *input, const char *outdir)
     return 0;
 }
 
-/* Directory mode only accepts files ending in .txt. */
+/* Only pick up .txt files when working with a directory. */
 static int ends_with_txt(const char *name)
 {
     size_t length = strlen(name);
@@ -550,7 +550,7 @@ static int ensure_directory(const char *path)
     return 0;
 }
 
-/* Read the options first, then choose single-file or directory mode. */
+/* Check the arguments to see which mode the user wants. */
 int main(int argc, char **argv)
 {
     const char *input = NULL;
@@ -609,7 +609,7 @@ int main(int argc, char **argv)
         }
         outdir = default_dir;
     }
-    /* A single input file does not need the directory scanning code. */
+    /* For one file, we can process it directly. */
     if (input != NULL)
         return process_file(input, outdir);
     struct stat dir_stat;
@@ -622,7 +622,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Cannot open input directory: %s\n", input_dir);
         return 1;
     }
-    /* Save paths first so output files are not picked up during scanning. */
+    /* Collect the input paths first, before creating any output files. */
     char **paths = NULL;
     size_t count = 0;
     size_t capacity = 0;
