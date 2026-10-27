@@ -15,13 +15,9 @@
 #include <math.h>
 #include <errno.h>
 #include <dirent.h>
-
-/* These names go into the output file names. */
 #define STUDENT_FIRST "ranjeet-kumar"
 #define STUDENT_LAST "gupta"
 #define STUDENT_ID "251ADB005"
-
-/* Keep track of decimals so integer division still works as expected. */
 typedef struct {
     long long integer;
     double real;
@@ -30,8 +26,6 @@ typedef struct {
 static const char *p;
 static const char *error_at;
 static int failed;
-
-/* Keep the first error we find. */
 static void fail_at(const char *where)
 {
     if (!failed) {
@@ -39,13 +33,11 @@ static void fail_at(const char *where)
         error_at = where;
     }
 }
-
 static void spaces(void)
 {
     while (*p == ' ' || *p == '\t' || *p == '\r')
         p++;
 }
-
 static Value make_integer(long long n)
 {
     Value v;
@@ -54,7 +46,6 @@ static Value make_integer(long long n)
     v.is_float = 0;
     return v;
 }
-
 static Value make_float(double n)
 {
     Value v;
@@ -63,13 +54,10 @@ static Value make_float(double n)
     v.is_float = 1;
     return v;
 }
-
 static double as_double(Value v)
 {
     return v.is_float ? v.real : (double)v.integer;
 }
-
-/* Check for overflow before doing the calculation. */
 static int add_overflow(long long a, long long b, long long *result)
 {
     if ((b > 0 && a > LLONG_MAX - b) ||
@@ -78,7 +66,6 @@ static int add_overflow(long long a, long long b, long long *result)
     *result = a + b;
     return 0;
 }
-
 static int sub_overflow(long long a, long long b, long long *result)
 {
     if ((b < 0 && a > LLONG_MAX + b) ||
@@ -87,7 +74,6 @@ static int sub_overflow(long long a, long long b, long long *result)
     *result = a - b;
     return 0;
 }
-
 static int mul_overflow(long long a, long long b, long long *result)
 {
     if (a == 0 || b == 0) {
@@ -111,8 +97,6 @@ static int mul_overflow(long long a, long long b, long long *result)
     *result = a * b;
     return 0;
 }
-
-/* A decimal number needs digits before and after the dot. */
 static Value number(void)
 {
     spaces();
@@ -134,7 +118,6 @@ static Value number(void)
         while (isdigit((unsigned char)*p))
             p++;
     }
-    /* Make a separate string so strtod can read the number. */
     size_t length = (size_t)(p - start);
     char *token = malloc(length + 1);
     if (token == NULL) {
@@ -171,10 +154,7 @@ static Value number(void)
     free(token);
     return value;
 }
-
 static Value expression(void);
-
-/* This part is either a number or something in parentheses. */
 static Value primary(void)
 {
     spaces();
@@ -193,8 +173,6 @@ static Value primary(void)
     }
     return number();
 }
-
-/* Work from the right for powers, so 2 ** 3 ** 2 is 2 ** (3 ** 2). */
 static Value power(void)
 {
     Value base = primary();
@@ -210,11 +188,6 @@ static Value power(void)
     Value exponent = power();
     if (failed)
         return make_integer(0);
-    if (!exponent.is_float && exponent.integer < 0) {
-        fail_at(rhs_start);
-        return make_integer(0);
-    }
-    /* If either value is a decimal, use pow() for the result. */
     if (base.is_float || exponent.is_float) {
         double result = pow(as_double(base), as_double(exponent));
         if (!isfinite(result)) {
@@ -223,7 +196,10 @@ static Value power(void)
         }
         return make_float(result);
     }
-    /* Repeated squaring makes large powers quicker to calculate. */
+    if (exponent.integer < 0) {
+        fail_at(rhs_start);
+        return make_integer(0);
+    }
     long long result = 1;
     long long factor = base.integer;
     unsigned long long remaining = (unsigned long long)exponent.integer;
@@ -243,8 +219,6 @@ static Value power(void)
     }
     return make_integer(result);
 }
-
-/* Handle * and / before + and -. */
 static Value term(void)
 {
     Value value = power();
@@ -261,7 +235,6 @@ static Value term(void)
         Value rhs = power();
         if (failed)
             break;
-        /* If either value is a decimal, do this calculation as a double. */
         if (value.is_float || rhs.is_float) {
             double divisor = as_double(rhs);
             if (op == '/' && divisor == 0.0) {
@@ -299,8 +272,6 @@ static Value term(void)
     }
     return value;
 }
-
-/* Addition and subtraction are handled after the other operations. */
 static Value expression(void)
 {
     Value value = term();
@@ -338,8 +309,6 @@ static Value expression(void)
     }
     return value;
 }
-
-/* Read everything first so errors can point to the right position. */
 static char *read_file(const char *path, size_t *length_out)
 {
     FILE *f = fopen(path, "rb");
@@ -387,8 +356,6 @@ static char *basename_copy(const char *path)
     }
     return copy;
 }
-
-/* Read an input file, calculate its lines, and save the results. */
 static int process_file(const char *input, const char *outdir)
 {
     char *base = basename_copy(input);
@@ -444,7 +411,6 @@ static int process_file(const char *input, const char *outdir)
     size_t pos = 0;
     size_t error_pos = 0;
     int has_error = 0;
-    /* Go through the file one line at a time. */
     while (pos < source_length) {
         size_t end = pos;
         while (end < source_length && source[end] != '\n')
@@ -455,7 +421,6 @@ static int process_file(const char *input, const char *outdir)
                 source[first] == '\t' ||
                 source[first] == '\r'))
             first++;
-        /* Ignore lines that start with #, even if there is whitespace first. */
         if (first < end && source[first] != '#') {
             char saved = source[end];
             source[end] = '\0';
@@ -504,7 +469,6 @@ static int process_file(const char *input, const char *outdir)
         free(base);
         return 1;
     }
-    /* If anything failed, write the error rather than partial answers. */
     if (has_error) {
         fprintf(out, "ERROR:%zu\n", error_pos);
     } else {
@@ -527,14 +491,11 @@ static int process_file(const char *input, const char *outdir)
     }
     return 0;
 }
-
-/* Only pick up .txt files when working with a directory. */
 static int ends_with_txt(const char *name)
 {
     size_t length = strlen(name);
     return length >= 4 && strcmp(name + length - 4, ".txt") == 0;
 }
-
 static int ensure_directory(const char *path)
 {
     struct stat st;
@@ -549,8 +510,6 @@ static int ensure_directory(const char *path)
     fprintf(stderr, "Cannot create output directory: %s\n", path);
     return 0;
 }
-
-/* Check the arguments to see which mode the user wants. */
 int main(int argc, char **argv)
 {
     const char *input = NULL;
@@ -609,7 +568,6 @@ int main(int argc, char **argv)
         }
         outdir = default_dir;
     }
-    /* For one file, we can process it directly. */
     if (input != NULL)
         return process_file(input, outdir);
     struct stat dir_stat;
@@ -622,7 +580,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "Cannot open input directory: %s\n", input_dir);
         return 1;
     }
-    /* Collect the input paths first, before creating any output files. */
     char **paths = NULL;
     size_t count = 0;
     size_t capacity = 0;
