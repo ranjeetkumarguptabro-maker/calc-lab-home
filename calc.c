@@ -1,9 +1,10 @@
 
 /*
- * Ranjeet Kumar Gupta 251ADB005
+ * Ranjeet Kumar Gupta
+ * studend id : 251ADB005
  * https://github.com/ranjeetkumarguptabro-maker/calc-lab-home
  * Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
- * Resources used: Gemini (Google).
+ * Resources used: Gemini (Google) for understanding , error fixing , some part of code writing,
  * Gemini conversation: https://share.google/7qfXVt5XmPBr
  */
 #include <stdio.h>
@@ -18,6 +19,9 @@
 #define STUDENT_FIRST "ranjeet-kumar"
 #define STUDENT_LAST "gupta"
 #define STUDENT_ID "251ADB005"
+/* A Value keeps integers as long long so integer calculations and output do not
+ * lose precision by passing through double. is_float selects the active value.
+ */
 typedef struct {
     long long integer;
     double real;
@@ -26,6 +30,11 @@ typedef struct {
 static const char *p;
 static const char *error_at;
 static int failed;
+
+/* Keep the first error only: later parser calls may unwind through the same
+ * invalid expression, but the assignment requires the position where parsing
+ * first became impossible.
+ */
 static void fail_at(const char *where)
 {
     if (!failed) {
@@ -58,6 +67,9 @@ static double as_double(Value v)
 {
     return v.is_float ? v.real : (double)v.integer;
 }
+/* Check integer limits before evaluating the operation. Signed overflow in C
+ * is undefined behavior, so checking the already-computed result is too late.
+ */
 static int add_overflow(long long a, long long b, long long *result)
 {
     if ((b > 0 && a > LLONG_MAX - b) ||
@@ -97,6 +109,10 @@ static int mul_overflow(long long a, long long b, long long *result)
     *result = a * b;
     return 0;
 }
+/* Parse one numeric token. The grammar accepts digits, optionally followed by
+ * a dot and at least one digit; converting a copied token lets strtod stop at
+ * a known terminator while integer tokens are checked against LLONG_MAX.
+ */
 static Value number(void)
 {
     spaces();
@@ -155,6 +171,9 @@ static Value number(void)
     return value;
 }
 static Value expression(void);
+/* primary is the highest-level parser unit: either a number or a parenthesized
+ * expression. Parentheses call expression() so the full grammar is allowed inside.
+ */
 static Value primary(void)
 {
     spaces();
@@ -173,6 +192,13 @@ static Value primary(void)
     }
     return number();
 }
+/* AI assistance note : Gemini prompt: "Explain why a
+ * recursive-descent power() parser should recursively parse the exponent to make
+ * exponentiation right-associative." Conversation link: add the shared chat URL.
+ * Parse exponentiation here, above multiplication/division in the grammar.
+ * Recursing to parse the exponent makes ** right-associative: 2 ** 3 ** 2 is
+ * read as 2 ** (3 ** 2), not (2 ** 3) ** 2.
+ */
 static Value power(void)
 {
     Value base = primary();
@@ -185,6 +211,7 @@ static Value power(void)
     p += 2;
     spaces();
     const char *rhs_start = p;
+    /* Parse the entire exponent recursively so another ** belongs to the RHS. */
     Value exponent = power();
     if (failed)
         return make_integer(0);
@@ -219,6 +246,9 @@ static Value power(void)
     }
     return make_integer(result);
 }
+/* term handles * and / after power() has handled **, which gives exponentiation
+ * higher precedence than multiplication and division.
+ */
 static Value term(void)
 {
     Value value = power();
@@ -272,6 +302,9 @@ static Value term(void)
     }
     return value;
 }
+/* expression handles + and - by parsing terms first, giving them lower
+ * precedence than multiplication, division, and exponentiation.
+ */
 static Value expression(void)
 {
     Value value = term();
@@ -309,6 +342,13 @@ static Value expression(void)
     }
     return value;
 }
+/* Gemini prompt: "Review this C
+ * approach for reading a whole input file into memory safely and tracking its length."
+ * Conversation link: add the shared chat URL if this tool helped with this section.
+ * Read the file into one buffer so parser pointers can refer directly to source
+ * characters. The extra byte stores the terminating NUL; the actual length is
+ * kept separately because source positions count the original file characters.
+ */
 static char *read_file(const char *path, size_t *length_out)
 {
     FILE *f = fopen(path, "rb");
@@ -356,6 +396,9 @@ static char *basename_copy(const char *path)
     }
     return copy;
 }
+/* Results are buffered until the whole input has been checked. This prevents
+ * successful early lines from being written when a later line contains an error.
+ */
 static int process_file(const char *input, const char *outdir)
 {
     char *base = basename_copy(input);
@@ -422,6 +465,9 @@ static int process_file(const char *input, const char *outdir)
                 source[first] == '\r'))
             first++;
         if (first < end && source[first] != '#') {
+            /* Temporarily terminate this line for the parser, but save the newline
+             * so the original buffer and file-wide character positions stay intact.
+             */
             char saved = source[end];
             source[end] = '\0';
             p = source + pos;
@@ -433,11 +479,20 @@ static int process_file(const char *input, const char *outdir)
                 fail_at(p);
             if (failed) {
                 has_error = 1;
+                /* Pointer subtraction gives the zero-based offset in the complete
+                 * file; add one because the assignment reports 1-based positions.
+                 */
                 error_pos = (size_t)(error_at - source) + 1;
                 source[end] = saved;
                 break;
             }
             source[end] = saved;
+            /* AI Gemini prompt: "Explain
+             * why doubling a dynamically allocated result array is more efficient
+             * than increasing its capacity by one each time." Add shared chat URL.
+             * Grow the result array geometrically. Doubling avoids reallocating
+             * for every new line and gives amortized constant-time appends.
+             */
             if (count == capacity) {
                 if (capacity > (size_t)-1 / 2 / sizeof *results) {
                     fprintf(stderr, "Too many results\n");
@@ -510,6 +565,10 @@ static int ensure_directory(const char *path)
     fprintf(stderr, "Cannot create output directory: %s\n", path);
     return 0;
 }
+/* Parse command-line options first, then choose single-file or directory mode.
+ * Invalid CLI usage is a program error (nonzero exit), unlike expression errors,
+ * which are written as ERROR:<position> to the result file.
+ */
 int main(int argc, char **argv)
 {
     const char *input = NULL;
