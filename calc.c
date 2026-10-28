@@ -4,8 +4,8 @@
  * studend id : 251ADB005
  * https://github.com/ranjeetkumarguptabro-maker/calc-lab-home
  * Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
- * Resources used: Gemini (Google) for understanding , error fixing , some part of code writing,
- * Gemini conversation: https://share.google/7qfXVt5XmPBr
+ * Resources used: Gemini (Google) for understanding , error fixing , some part of code writing
+ * Gemini conversation: https://share.gemini.google/YsQTwsKUHjaA
  */
 #include <stdio.h>
 #include <stdlib.h>
